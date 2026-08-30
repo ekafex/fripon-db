@@ -7,7 +7,7 @@ __pycache__/
 venv/
 env/
 
-# Local data/databases
+# Local mirror/database
 data/
 *.sqlite
 *.sqlite3
@@ -20,21 +20,17 @@ data/
 *.jpg
 *.jpeg
 *.png
+*.part
 
-# Jupyter
+# Jupyter / editor / OS
 .ipynb_checkpoints/
-
-# IDE/editor
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# OS
 .DS_Store
 Thumbs.db
 
 # Logs/temp
 *.log
 *.tmp
-*.part

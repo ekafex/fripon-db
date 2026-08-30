@@ -14,11 +14,7 @@ def make_session(
     retries: int = 5,
     backoff_factor: float = 1.0,
 ) -> requests.Session:
-    """
-    Create a requests.Session with retry/backoff for transient failures.
-
-    Retries connection/read errors and HTTP 429/500/502/503/504 responses.
-    """
+    """Create a requests session with retry/backoff for transient failures."""
     retry = Retry(
         total=retries,
         connect=retries,
@@ -55,7 +51,6 @@ def get(
     timeout: int = DEFAULT_TIMEOUT,
     **kwargs,
 ) -> requests.Response:
-    """GET with a consistent timeout and final HTTP status check."""
     response = session.get(url, timeout=timeout, **kwargs)
     response.raise_for_status()
     return response

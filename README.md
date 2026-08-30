@@ -1,43 +1,158 @@
-# fripon-db
-Proof-of-concept for building a local research archive from the public FRIPON web database.
+# FRIPON Local Database / Archive PoC
 
-The code separates station ingestion, historical capture discovery, JPEG downloading/validation, and SQLite persistence. Image analysis is intentionally outside this layer.
+A small, robust proof-of-concept for building a **local mirror of the public
+FRIPON capture archive**.
 
-## Main commands
+The primary ingestion key is the FRIPON numeric capture ID. The mirror does
+not depend on capture IDs being chronological: station and UTC metadata are
+extracted from each valid capture page and stored locally.
 
-Build/update the station catalogue:
+## Project layout
+
+```text
+fripon_database_poc_v4/
+├── README.md
+├── .gitignore
+├── requirements.txt
+├── db.py
+├── http_utils.py
+├── stations.py
+├── captures.py
+├── download.py
+├── build_db.py
+├── harvest_ids.py
+└── collect_snapshot.py
+```
+
+`collect_snapshot.py` remains useful for targeted historical tests, but
+`harvest_ids.py` is the main archive-building tool.
+
+## Setup
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+## 1. Build/update station metadata
 
 ```bash
 python build_db.py
 ```
 
-Collect a historical network snapshot:
+This creates/updates the `stations` table in:
+
+```text
+data/fripon.sqlite
+```
+
+FRIPON's numeric station ID is the primary key. Station code is deliberately
+not unique because the public catalogue currently contains a duplicated code.
+
+## 2. Harvest a capture-ID range
+
+Example:
+
+```bash
+python harvest_ids.py 42080000 42080500
+```
+
+The range is inclusive.
+
+For every ID, the harvester:
+
+1. skips it if it is already safely mirrored;
+2. requests `displaycapture.php?id=...`;
+3. records IDs that do not correspond to a valid capture;
+4. extracts station, city, UTC timestamp and full-resolution JPEG URL;
+5. downloads and validates the JPEG;
+6. calculates file size, dimensions and SHA-256;
+7. inserts/upserts the metadata in SQLite;
+8. records harvest status and failures for reliable resumption.
+
+Images are organized independently of numeric capture ID:
+
+```text
+data/images/
+└── FRPL01/
+    └── 2019/
+        └── 02/
+            └── FRPL01_20190227T144323_UT-0.jpg
+```
+
+The SQLite database can later sort/query by timestamp, station or geography.
+
+## Resumability and idempotency
+
+Rerunning the same command is safe:
+
+```bash
+python harvest_ids.py 42080000 42080500
+```
+
+- valid images already present locally are skipped;
+- IDs already confirmed invalid are skipped;
+- failed IDs are retried;
+- a `downloaded` database record whose file is missing is processed again.
+
+This makes interruption by power loss, network loss or Ctrl-C non-destructive.
+
+## Polite request rate
+
+Defaults are deliberately conservative:
+
+```text
+workers = 2
+minimum request-start interval = 0.25 s
+```
+
+Change them only after observing FRIPON/server/network behaviour:
+
+```bash
+python harvest_ids.py 42080000 42080500 \
+    --workers 3 \
+    --request-interval 0.20
+```
+
+Retries with exponential backoff are handled centrally by `http_utils.py` for
+transient connection/DNS errors and HTTP 429/500/502/503/504 responses.
+
+## Database tables
+
+### `stations`
+
+Current FRIPON station metadata.
+
+### `captures`
+
+Metadata and local-file information for valid captures.
+
+### `harvest_status`
+
+One row per attempted capture ID:
+
+- `downloaded`
+- `invalid`
+- `failed`
+
+It also records attempt count and the last error. This is what makes arbitrary
+ID ranges resumable without repeatedly probing known gaps.
+
+## Targeted snapshot utility
+
+The earlier experimental time-search utility remains available:
 
 ```bash
 python collect_snapshot.py "2023-04-27 05:30:00"
 ```
 
-By default the snapshot collector searches within ±90 s and scans ±600 capture IDs around the binary-search anchor. Images are stored in:
+It is useful for validation and targeted science, but is not required for a
+complete archive mirror.
 
-```text
-data/images/YYYYMMDD_HHMMSS/
-```
+## Important operational note
 
-The `captures` table stores capture ID, station code, resolved numeric station ID when unambiguous, city, UTC timestamp, full-resolution image URL, local path, file size, SHA-256, dimensions, and download status.
-
-## Important assumption
-
-Capture IDs are not globally chronological over the complete FRIPON archive. Empirical tests showed that IDs become approximately chronological around ID 16,000,000 (about September 2019 onward). The binary-search helper targets that region for efficient historical sampling.
-
-This assumption is only for efficient lookup. A future full archive mirror can ingest IDs independently and sort locally by timestamp.
-
-## Request policy
-
-**Keep request rates conservative. FRIPON is a scientific public service rather than a bulk archive API.**
-
-## Network resilience
-
-All HTTP access uses the shared http.py session with automatic retry and exponential backoff. Transient connection/DNS problems and HTTP 429/500/502/503/504 responses are retried automatically.
-
-Persistent failures still raise an exception so they remain visible rather than being silently ignored.
-
+FRIPON is a scientific public service, not a bulk-storage API. Large mirroring
+jobs should be divided into reasonable ID ranges and run conservatively. The
+project therefore favors reliability, resumption and low request pressure over
+maximum download speed.

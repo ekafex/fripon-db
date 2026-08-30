@@ -41,6 +41,17 @@ CREATE TABLE IF NOT EXISTS captures (
 );
 """
 
+HARVEST_SCHEMA = """
+CREATE TABLE IF NOT EXISTS harvest_status (
+    capture_id          INTEGER PRIMARY KEY,
+    status              TEXT NOT NULL,
+    attempts            INTEGER NOT NULL DEFAULT 0,
+    last_error          TEXT,
+    first_attempt_utc   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_attempt_utc    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 INDEX_SCHEMA = """
 CREATE INDEX IF NOT EXISTS idx_stations_code
 ON stations(code);
@@ -56,6 +67,9 @@ ON captures(station_id);
 
 CREATE INDEX IF NOT EXISTS idx_captures_timestamp
 ON captures(timestamp_utc);
+
+CREATE INDEX IF NOT EXISTS idx_harvest_status
+ON harvest_status(status);
 """
 
 
@@ -66,12 +80,16 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
+    conn.execute("PRAGMA journal_mode = WAL;")
+    conn.execute("PRAGMA synchronous = NORMAL;")
+    conn.execute("PRAGMA busy_timeout = 5000;")
     return conn
 
 
 def initialize_database(conn: sqlite3.Connection) -> None:
     conn.execute(STATION_SCHEMA)
     conn.execute(CAPTURE_SCHEMA)
+    conn.execute(HARVEST_SCHEMA)
     conn.executescript(INDEX_SCHEMA)
     conn.commit()
 
@@ -159,6 +177,54 @@ def upsert_capture(conn: sqlite3.Connection, capture: Mapping[str, Any]) -> None
         """,
         capture,
     )
+
+
+def get_capture_row(conn: sqlite3.Connection, capture_id: int) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM captures WHERE id = ?",
+        (capture_id,),
+    ).fetchone()
+
+
+def mark_harvest_status(
+    conn: sqlite3.Connection,
+    capture_id: int,
+    status: str,
+    error: str | None = None,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO harvest_status (
+            capture_id, status, attempts, last_error,
+            first_attempt_utc, last_attempt_utc
+        )
+        VALUES (?, ?, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT(capture_id) DO UPDATE SET
+            status           = excluded.status,
+            attempts         = harvest_status.attempts + 1,
+            last_error       = excluded.last_error,
+            last_attempt_utc = CURRENT_TIMESTAMP
+        """,
+        (capture_id, status, error),
+    )
+
+
+def get_harvest_states(
+    conn: sqlite3.Connection,
+    start_id: int,
+    end_id: int,
+) -> dict[int, sqlite3.Row]:
+    rows = conn.execute(
+        """
+        SELECT h.capture_id, h.status, h.attempts, h.last_error,
+               c.local_path
+        FROM harvest_status h
+        LEFT JOIN captures c ON c.id = h.capture_id
+        WHERE h.capture_id BETWEEN ? AND ?
+        """,
+        (start_id, end_id),
+    ).fetchall()
+    return {int(row["capture_id"]): row for row in rows}
 
 
 def station_count(conn: sqlite3.Connection) -> int:

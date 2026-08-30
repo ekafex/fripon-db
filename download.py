@@ -6,6 +6,8 @@ from pathlib import Path
 import requests
 from PIL import Image
 
+from http_utils import get, make_session
+
 
 def download_capture_image(capture: dict, output_dir: str | Path, session: requests.Session | None = None, timeout: int = 30) -> dict:
     output_dir = Path(output_dir)
@@ -15,11 +17,9 @@ def download_capture_image(capture: dict, output_dir: str | Path, session: reque
 
     own_session = session is None
     if session is None:
-        session = requests.Session()
-        session.headers.update({
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://fireball.fripon.org/",
-        })
+        session = make_session(
+            referer="https://fireball.fripon.org/"
+        )
 
     status = "exists"
     if not path.exists():

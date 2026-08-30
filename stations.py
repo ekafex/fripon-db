@@ -7,6 +7,7 @@ from typing import Any
 import requests
 
 from db import get_station, upsert_station
+from http_utils import get, make_session
 
 
 BASE_URL = "https://fireball.fripon.org"
@@ -87,21 +88,16 @@ def fetch_stations(
 ) -> tuple[list[dict[str, Any]], int]:
     own_session = session is None
     if session is None:
-        session = requests.Session()
+        session = make_session(referer=STATION_PAGE)
 
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0",
-        "Referer": STATION_PAGE,
-    })
+    get(session, STATION_PAGE, timeout=timeout)
 
-    session.get(STATION_PAGE, timeout=timeout).raise_for_status()
-
-    r = session.get(
+    r = get(
+        session,
         STATION_ENDPOINT,
         params=_datatable_params(),
         timeout=timeout,
     )
-    r.raise_for_status()
 
     payload = r.json()
     rows = payload.get("data", [])

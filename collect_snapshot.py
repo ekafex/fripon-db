@@ -6,6 +6,7 @@ from pathlib import Path
 
 import requests
 
+from http_utils import make_session
 from captures import find_capture_near_date, captures_near_time
 from db import connect, initialize_database, resolve_station_id, upsert_capture
 from download import download_capture_image
@@ -45,11 +46,9 @@ def main() -> None:
     conn = connect(args.db)
     initialize_database(conn)
 
-    download_session = requests.Session()
-    download_session.headers.update({
-        "User-Agent": "Mozilla/5.0",
-        "Referer": "https://fireball.fripon.org/",
-    })
+    download_session = make_session(
+        referer="https://fireball.fripon.org/"
+    )
 
     downloaded = reused = failed = unresolved = 0
 

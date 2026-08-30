@@ -8,6 +8,8 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
+from http_utils import get, make_session as make_http_session
+
 
 BASE_URL = "https://fireball.fripon.org"
 CAPTURE_PAGE = f"{BASE_URL}/displaycapture.php"
